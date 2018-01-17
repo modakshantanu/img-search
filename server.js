@@ -5,6 +5,8 @@
 var express = require('express');
 var app = express();
 var mongodb = require("mongodb");
+var MongoClient = mongodb.MongoClient;
+var dburl = "mongodb://"+process.env.USER+":"+process.env.PASSWORD+"@ds259117.mlab.com:59117/img-search";
 
 'use strict';
 
@@ -26,35 +28,42 @@ let path = '/bing/v7.0/images/search';
 var k;
 
 
-let response_handler = function (response) {
-    let body = '';
-    response.on('data', function (d) {
-        body += d;
-    });
-    response.on('end', function () {
-        body = JSON.parse(body);
-        k = body.value;
-    });
-    response.on('error', function (e) {
-        console.log('Error: ' + e.message);
-    });
-};
 
-let bing_web_search = function (search) {
- 
-  let request_params = {
-        method : 'GET',
-        hostname : host,
-        path : path + '?q=' + encodeURIComponent(search),
-        headers : {
-            'Ocp-Apim-Subscription-Key' : subscriptionKey,
-        }
-    };
 
-    let req = https.request(request_params, response_handler);
-    req.end();
-}
 
+
+
+app.get("/recents",function(req,res){
+  
+  MongoClient.connect(dburl,function(err,parentDB){
+    if(err)console.log("err");else{
+      
+      var db= parentDB.db("img-search");
+      var recentCollection = db.collection("recent-searches");
+      
+      recentCollection.find().toArray(function(err,result){
+        if(err)return;
+        
+        
+        if(result[0].recents){
+           res.end(JSON.stringify(result[0].recents)); 
+        }else
+          res.end("No records found");
+        
+      
+      
+      })
+      
+      
+      
+      
+    }
+    
+  });
+  
+  
+  
+});
 
 
 app.get('/search/:query',function(req,resp){
@@ -91,6 +100,63 @@ app.get('/search/:query',function(req,resp){
           result+="\n";
           
         }
+      
+        var queryobj = {
+          "term":query,
+          "time":new Date().toString()
+        }
+        
+        
+        
+        MongoClient.connect(dburl,function(err,parentDB){
+          
+          if (err) {
+            console.log('Unable to connect to the mongoDB server. Error:', err);
+          } else {
+            console.log('Connection established to', dburl);
+            
+            var db=parentDB.db("img-search");
+            var recentCollection = db.collection("recent-searches");
+            var recentCursor = recentCollection.find();
+            recentCursor.toArray(function(err,arr){
+              if(err) throw err;
+              if(arr.length==0||arr[0].recents.length==0){
+                
+                
+                recentCollection.insert(
+                  {
+                  "recents":[queryobj]  
+                  }
+                );
+                
+                
+              }else{
+                var oldRecents = arr[0].recents;
+                
+               
+                oldRecents.unshift(queryobj);
+               
+                if(oldRecents.length>5)
+                  oldRecents.pop();
+            
+                
+                
+                
+                recentCollection.update({},{"recents":oldRecents});
+                  
+                
+                
+              }
+
+
+              
+            });
+            
+          }
+          
+        });
+      
+      
       
         resp.end(result);
     });
